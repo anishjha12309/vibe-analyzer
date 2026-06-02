@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import random as _random
 import re
 import time
 from collections import OrderedDict
@@ -172,22 +173,38 @@ _VIBE_KEYWORDS: dict[str, list[str]] = {
         "gaming", "fps", "workout", "gym", "fitness", "action", "sports",
         "race", "battle", "fight", "adrenaline", "intense", "hype",
         "edm", "dubstep", "drum and bass", "dnb", "hardstyle", "techno",
+        # common in real music videos / descriptions
+        "remix", "bass", "trap", "hip hop", "hip-hop", "rap", "metal",
+        "punk", "electronic", "club", "banger", "drill", "hard rock",
+        "rock", "indie rock", "alternative rock", "punk rock", "rave",
+        "feat", "featuring", "official music video", "music video",
     ],
     "relaxing": [
         "lofi", "lo-fi", "chill", "relax", "sleep", "calm", "nature",
         "ambient", "cozy", "study", "peaceful", "meditation", "rain",
         "soft", "gentle", "slow", "acoustic", "jazz", "classical",
+        # common in real acoustic/instrumental content
+        "piano", "unplugged", "instrumental", "background music",
+        "focus", "spa", "yoga", "cover", "stripped", "live session",
+        "session", "acoustic version", "piano version",
     ],
     "happy": [
         "funny", "comedy", "laugh", "happy", "joy", "celebration", "party",
         "fun", "vlog", "travel", "adventure", "positive", "wholesome",
         "dance", "pop", "summer", "upbeat", "feel good",
+        # common in upbeat pop videos
+        "good vibes", "cheerful", "catchy", "pop music", "feel-good",
+        "official video", "lyric video", "bouncy", "bright",
     ],
     "melancholic": [
         "sad", "emotional", "depression", "anxiety", "loss", "grief",
         "heartbreak", "lonely", "nostalgic", "melancholy", "bitter",
         "symphony", "orchestral", "strings", "cinematic", "indie",
         "alternative", "grunge", "dark", "reflection", "sorrow",
+        # common in ballads / singer-songwriter content
+        "ballad", "slow song", "love song", "miss you", "breakup",
+        "heartbroken", "tears", "hurt", "pain", "alone", "folk",
+        "acoustic ballad", "piano ballad", "singer-songwriter",
     ],
 }
 
@@ -195,11 +212,9 @@ _VIBE_TARGETS: dict[str, dict[str, Any]] = {
     "high_energy": {
         "label": "High Energy",
         "search_queries": [
-            "Skrillex",
-            "Daft Punk",
-            "The Prodigy",
-            "Calvin Harris",
-            "Avicii",
+            "Skrillex", "Daft Punk", "The Prodigy", "Calvin Harris", "Avicii",
+            "Marshmello", "Diplo", "Chemical Brothers", "Fatboy Slim", "Nine Inch Nails",
+            "Eminem", "Kendrick Lamar", "Metallica", "Linkin Park", "Imagine Dragons",
         ],
         "est_features": {
             "danceability": 0.82, "energy": 0.91, "valence": 0.65,
@@ -210,11 +225,9 @@ _VIBE_TARGETS: dict[str, dict[str, Any]] = {
     "relaxing": {
         "label": "Chill & Relaxing",
         "search_queries": [
-            "Nils Frahm",
-            "Ludovico Einaudi",
-            "Olafur Arnalds",
-            "Tycho",
-            "Brian Eno",
+            "Nils Frahm", "Ludovico Einaudi", "Olafur Arnalds", "Tycho", "Brian Eno",
+            "Max Richter", "Johann Johannsson", "Explosions in the Sky", "Agnes Obel", "Moby",
+            "Cigarettes After Sex", "Nick Drake", "Sufjan Stevens", "Hans Zimmer", "Hammock",
         ],
         "est_features": {
             "danceability": 0.48, "energy": 0.28, "valence": 0.32,
@@ -225,11 +238,9 @@ _VIBE_TARGETS: dict[str, dict[str, Any]] = {
     "happy": {
         "label": "Happy & Uplifting",
         "search_queries": [
-            "Pharrell Williams",
-            "Bruno Mars",
-            "Dua Lipa",
-            "Harry Styles",
-            "Lizzo",
+            "Pharrell Williams", "Bruno Mars", "Dua Lipa", "Harry Styles", "Lizzo",
+            "Taylor Swift", "Ed Sheeran", "Katy Perry", "Ariana Grande", "Justin Timberlake",
+            "Michael Jackson", "Stevie Wonder", "Mark Ronson", "Earth Wind Fire", "Beyonce",
         ],
         "est_features": {
             "danceability": 0.75, "energy": 0.68, "valence": 0.84,
@@ -240,11 +251,9 @@ _VIBE_TARGETS: dict[str, dict[str, Any]] = {
     "melancholic": {
         "label": "Melancholic",
         "search_queries": [
-            "Radiohead",
-            "The National",
-            "Bon Iver",
-            "Portishead",
-            "Beach House",
+            "Radiohead", "The National", "Bon Iver", "Portishead", "Beach House",
+            "Elliott Smith", "Nick Cave", "Joy Division", "Sigur Ros", "Mazzy Star",
+            "Lana Del Rey", "Fleet Foxes", "Phoebe Bridgers", "Iron and Wine", "Daughter",
         ],
         "est_features": {
             "danceability": 0.38, "energy": 0.29, "valence": 0.18,
@@ -255,11 +264,9 @@ _VIBE_TARGETS: dict[str, dict[str, Any]] = {
     "default": {
         "label": "Balanced",
         "search_queries": [
-            "Coldplay",
-            "Arctic Monkeys",
-            "The Killers",
-            "Arcade Fire",
-            "Vampire Weekend",
+            "Coldplay", "Arctic Monkeys", "The Killers", "Arcade Fire", "Vampire Weekend",
+            "Tame Impala", "Mac DeMarco", "Kings of Leon", "The Strokes", "Franz Ferdinand",
+            "MGMT", "Phoenix", "Foster the People", "alt-J", "Two Door Cinema Club",
         ],
         "est_features": {
             "danceability": 0.65, "energy": 0.58, "valence": 0.55,
@@ -288,7 +295,7 @@ def _is_spam_track(track: dict[str, Any]) -> bool:
     return False
 
 
-def _classify_vibe(title: str, description: str, tags: list[str], category_id: str) -> str:
+def _classify_vibe(title: str, description: str, tags: list[str], category_id: str, video_id: str = "") -> str:
     text = " ".join([title, description, " ".join(tags)]).lower()
     category = _CATEGORY_MAP.get(category_id, "")
     scores: dict[str, int] = {k: 0 for k in _VIBE_KEYWORDS}
@@ -300,14 +307,22 @@ def _classify_vibe(title: str, description: str, tags: list[str], category_id: s
     if category in ("gaming", "sports"):
         scores["high_energy"] += 3
     elif category == "music":
-        if any(w in text for w in ("lo-fi", "lofi", "ambient", "sleep", "study")):
+        if any(w in text for w in ("lo-fi", "lofi", "ambient", "sleep", "study", "piano", "acoustic", "instrumental", "cover", "classical", "jazz")):
             scores["relaxing"] += 3
-        if any(w in text for w in ("symphony", "orchestral", "strings", "bitter", "indie", "alternative")):
+        if any(w in text for w in ("symphony", "orchestral", "strings", "bitter", "indie", "alternative", "ballad", "sad", "heartbreak", "folk", "singer-songwriter")):
             scores["melancholic"] += 3
-        if any(w in text for w in ("party", "dance", "summer", "pop", "feel good")):
+        if any(w in text for w in ("party", "dance", "summer", "pop", "feel good", "happy", "upbeat", "catchy")):
             scores["happy"] += 2
+        if any(w in text for w in ("remix", "trap", "bass", "edm", "electronic", "rock", "metal", "drill", "hip hop", "hip-hop", "rap")):
+            scores["high_energy"] += 2
     best = max(scores, key=lambda k: scores[k])
-    return best if scores[best] > 0 else "default"
+    if scores[best] > 0:
+        return best
+    # Deterministic fallback: hash the video_id so different videos get different vibes
+    # rather than every unclassified video always returning "default"
+    _vibes = ["high_energy", "relaxing", "happy", "melancholic", "default"]
+    idx = int(hashlib.md5((video_id or title).encode()).hexdigest()[:2], 16) % len(_vibes)
+    return _vibes[idx]
 
 
 def _extract_video_id(url: str) -> str:
@@ -435,14 +450,19 @@ async def vibe_matcher(body: VibeMatcherRequest, request: Request):
             )
         raise HTTPException(status_code=500, detail=f"YouTube error: {e}")
 
-    vibe = _classify_vibe(title, description, tags, category_id)
+    vibe = _classify_vibe(title, description, tags, category_id, video_id)
     profile = _VIBE_TARGETS[vibe]
 
     # ── Spotify track search (recommendations API deprecated Nov 2024) ──
+    # Sample 5 artists from the vibe's pool, seeded by video_id for consistency
+    _rng = _random.Random(video_id)
+    all_queries = profile["search_queries"]
+    queries = _rng.sample(all_queries, min(5, len(all_queries)))
+
     tracks: list[SpotifyTrack] = []
     try:
         sp = _sp()
-        for query in profile["search_queries"]:
+        for query in queries:
             if len(tracks) >= 20:
                 break
             results = await asyncio.to_thread(
