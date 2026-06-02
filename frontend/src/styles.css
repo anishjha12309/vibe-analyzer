@@ -100,7 +100,6 @@
 }
 
 html {
-  scroll-behavior: smooth;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -391,7 +390,6 @@ img {
   z-index: 1;
   text-align: center;
   max-width: 900px;
-  animation: fadeInUp 1s var(--ease-out) both;
 }
 
 /* --- Hero Pill (badge) --- */
@@ -409,6 +407,7 @@ img {
   letter-spacing: 0.15em;
   font-weight: 600;
   margin-bottom: var(--space-xl);
+  animation: fadeInDown 0.6s var(--ease-out) 0.05s both;
 }
 
 .hero-pill-dot {
@@ -431,10 +430,12 @@ img {
 .hero-headline em,
 .hero-headline-accent {
   font-style: italic;
-  background: linear-gradient(135deg, #4a8eff, #8ec5ff);
+  background: linear-gradient(90deg, #4a8eff 0%, #8ec5ff 35%, #c4e0ff 55%, #4a8eff 100%);
+  background-size: 200% auto;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+  animation: accentGradient 3s linear infinite;
 }
 
 .hero-subtitle {
@@ -444,6 +445,7 @@ img {
   margin: 0 auto var(--space-3xl);
   line-height: 1.7;
   font-weight: 300;
+  animation: fadeInUp 0.8s var(--ease-out) 0.85s both;
 }
 
 /* --- Hero Orb Variants (kept for compatibility, hidden on white+blue) --- */
@@ -529,7 +531,7 @@ img {
   max-width: 640px;
   width: 100%;
   margin: 0 auto;
-  animation: fadeInUp 1s var(--ease-out) 0.5s both;
+  animation: fadeInUp 1s var(--ease-out) 1.05s both;
 }
 
 .search-bar:focus-within {
@@ -2016,3 +2018,366 @@ img {
     gap: var(--space-lg);
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   LENIS SMOOTH SCROLL
+   ═══════════════════════════════════════════════════════════════ */
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+.lenis.lenis-smooth [data-lenis-prevent] {
+  overscroll-behavior: contain;
+}
+.lenis.lenis-stopped {
+  overflow: hidden;
+}
+.lenis.lenis-smooth iframe {
+  pointer-events: none;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   NEW KEYFRAMES
+   ═══════════════════════════════════════════════════════════════ */
+@keyframes heroLineReveal {
+  from {
+    opacity: 0;
+    transform: translateY(55px);
+    filter: blur(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+@keyframes accentGradient {
+  from { background-position: 0% center; }
+  to   { background-position: 200% center; }
+}
+
+@keyframes scrollBounce {
+  0%, 100% { opacity: 0.35; transform: rotate(45deg) translate(0, 0); }
+  50%       { opacity: 0.75; transform: rotate(45deg) translate(3px, 3px); }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   HERO LINE STAGGER
+   ═══════════════════════════════════════════════════════════════ */
+.hero-line {
+  display: block;
+  opacity: 0;
+  will-change: opacity, transform, filter;
+  animation: heroLineReveal 0.85s var(--ease-out) forwards;
+}
+
+.hero-headline .hero-line:nth-child(1) { animation-delay: 0.18s; }
+.hero-headline .hero-line:nth-child(2) { animation-delay: 0.30s; }
+.hero-headline .hero-line:nth-child(3) { animation-delay: 0.42s; }
+.hero-headline .hero-line:nth-child(4) { animation-delay: 0.54s; }
+
+/* ═══════════════════════════════════════════════════════════════
+   SCROLL INDICATOR
+   ═══════════════════════════════════════════════════════════════ */
+.hero-scroll-indicator {
+  position: absolute;
+  bottom: var(--space-2xl);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  animation: fadeInUp 0.7s var(--ease-out) 1.8s both;
+}
+
+.hero-scroll-line {
+  width: 1px;
+  height: 28px;
+  background: linear-gradient(to bottom, transparent, rgba(255, 255, 255, 0.35));
+}
+
+.hero-scroll-arrow {
+  width: 12px;
+  height: 12px;
+  border-right: 1.5px solid rgba(255, 255, 255, 0.45);
+  border-bottom: 1.5px solid rgba(255, 255, 255, 0.45);
+  transform: rotate(45deg);
+  animation: scrollBounce 2s ease-in-out infinite;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   NAV SCROLLED STATE
+   ═══════════════════════════════════════════════════════════════ */
+.nav {
+  transition:
+    background var(--duration-normal) ease,
+    border-color var(--duration-normal) ease,
+    box-shadow var(--duration-normal) ease;
+}
+
+.nav-scrolled {
+  background: rgba(8, 18, 34, 0.9) !important;
+  border-color: rgba(255, 255, 255, 0.07) !important;
+  box-shadow: 0 4px 28px rgba(0, 0, 0, 0.3);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SCROLL REVEAL
+   ═══════════════════════════════════════════════════════════════ */
+.reveal {
+  opacity: 0;
+  transform: translateY(28px);
+  transition:
+    opacity 0.75s var(--ease-out),
+    transform 0.75s var(--ease-out);
+}
+
+.reveal.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.reveal-delay-1 { transition-delay: 0.1s; }
+.reveal-delay-2 { transition-delay: 0.2s; }
+.reveal-delay-3 { transition-delay: 0.3s; }
+.reveal-delay-4 { transition-delay: 0.4s; }
+
+/* ═══════════════════════════════════════════════════════════════
+   TOUCH-FRIENDLY MINIMUM TAP TARGETS (44×44 MINIMUM)
+   ═══════════════════════════════════════════════════════════════ */
+.search-bar-btn,
+.deep-analyze-btn,
+.footer-social-btn,
+.result-youtube-link,
+.link-btn {
+  min-height: 44px;
+}
+
+.track-card {
+  min-height: 120px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   RESULT CARDS — STAGGER ON APPEAR
+   ═══════════════════════════════════════════════════════════════ */
+.result-video-card {
+  animation: fadeInUp 0.55s var(--ease-out) 0.05s both;
+}
+
+.result-tracks-card {
+  animation: fadeInUp 0.55s var(--ease-out) 0.18s both;
+}
+
+.deep-analyze-btn {
+  animation: fadeInUp 0.5s var(--ease-out) 0.1s both;
+}
+
+.dashboard-wrapper {
+  animation: fadeInUp 0.5s var(--ease-out) both;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   RESPONSIVE — 640px (large phone / small tablet)
+   ═══════════════════════════════════════════════════════════════ */
+@media (max-width: 640px) {
+  /* Nav */
+  .nav-center {
+    display: none;
+  }
+
+  /* Hero */
+  .hero {
+    padding: 96px var(--space-md) var(--space-4xl);
+  }
+
+  .hero-scroll-indicator {
+    display: none;
+  }
+
+  /* Search bar — stack, hide orphaned icon, prevent iOS zoom */
+  .search-bar {
+    flex-direction: column;
+    border-radius: var(--radius-lg);
+    padding: var(--space-sm);
+    gap: var(--space-xs);
+  }
+
+  .search-bar-icon {
+    display: none;
+  }
+
+  .search-bar-input {
+    padding: 0.9rem var(--space-md);
+    font-size: 16px;
+  }
+
+  .search-bar-btn {
+    border-radius: var(--radius-md);
+    width: 100%;
+    min-width: unset;
+    justify-content: center;
+  }
+
+  /* Video card header — stack on small screens */
+  .result-video-header {
+    flex-direction: column;
+    gap: var(--space-md);
+    align-items: flex-start;
+  }
+
+  .result-youtube-link {
+    align-self: flex-start;
+  }
+
+  /* Track grid: single column */
+  .track-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Dashboard: single column */
+  .dashboard-header {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Toast: edge-to-edge on mobile */
+  .toast-container {
+    bottom: 0;
+    right: 0;
+    left: 0;
+    padding: var(--space-sm) var(--space-md) var(--space-md);
+  }
+
+  .toast {
+    max-width: 100%;
+    border-radius: var(--radius-md);
+  }
+
+  /* Results */
+  .results-section {
+    padding: var(--space-2xl) var(--space-md);
+  }
+
+  .result-video-title {
+    font-size: 1.2rem;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   RESPONSIVE — 641px–768px (tablet portrait)
+   ═══════════════════════════════════════════════════════════════ */
+@media (min-width: 641px) and (max-width: 768px) {
+  .track-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .hero {
+    padding: 110px var(--space-lg) var(--space-4xl);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   RESPONSIVE — EXTRA SMALL (≤380px)
+   ═══════════════════════════════════════════════════════════════ */
+@media (max-width: 380px) {
+  .nav {
+    max-width: 94%;
+    padding: 0 var(--space-md);
+  }
+
+  .nav-brand {
+    font-size: 0.95rem;
+  }
+
+  .hero-headline {
+    font-size: 2.8rem !important;
+  }
+
+  .hero-pill {
+    font-size: 0.62rem;
+    padding: 0.28rem 0.8rem;
+  }
+
+  .result-video-card,
+  .result-tracks-card,
+  .panel,
+  .chart-panel,
+  .dashboard-header {
+    padding: var(--space-md);
+  }
+
+  .track-card {
+    padding: var(--space-md);
+  }
+
+  .audio-stats-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   RESPONSIVE — TOUCH TWEAKS
+   ═══════════════════════════════════════════════════════════════ */
+@media (hover: none) and (pointer: coarse) {
+  /* Disable hover animations on touch (avoid sticky hover states) */
+  .track-card:hover {
+    transform: none;
+    box-shadow: var(--shadow-sm);
+  }
+
+  .track-card:active {
+    transform: scale(0.98);
+    transition: transform 0.1s ease;
+  }
+
+  .deep-analyze-btn:hover {
+    transform: none;
+  }
+
+  .deep-analyze-btn:active {
+    transform: scale(0.99);
+    transition: transform 0.1s ease;
+  }
+
+  /* Show track open link on touch */
+  .track-card-open {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PERFORMANCE — REDUCE MOTION
+   ═══════════════════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .hero-line,
+  .hero-pill,
+  .hero-subtitle,
+  .search-bar,
+  .nav {
+    animation: none;
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+
+  .hero-headline-accent,
+  .hero-headline em {
+    animation: none;
+    background-position: 0% center;
+  }
+}
+

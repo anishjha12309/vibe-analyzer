@@ -5,6 +5,8 @@ import { useToast } from './hooks/useToast';
 import { ToastProvider } from './hooks/useToast';
 import { TrackList } from './components/TrackList';
 import { Dashboard } from './components/Dashboard';
+import { useLenis } from './hooks/useLenis';
+import { useScrollReveal } from './hooks/useScrollReveal';
 
 import heroBg from './assets/images/hero_bg.png';
 
@@ -30,6 +32,9 @@ function VibeBadge({ label }: { label: string }) {
 
 /* ─── Inner app (needs toast context) ─── */
 function VibeApp() {
+  useLenis();
+  useScrollReveal();
+
   const { addToast } = useToast();
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -38,6 +43,7 @@ function VibeApp() {
   const [showDashboard, setShowDashboard] = useState(false);
 
   const resultsRef = useRef<HTMLDivElement>(null);
+  const navRef = useRef<HTMLElement>(null);
 
   /* scroll to results when they arrive */
   useEffect(() => {
@@ -45,6 +51,19 @@ function VibeApp() {
       resultsRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   }, [result]);
+
+  /* nav scroll state */
+  useEffect(() => {
+    const nav = navRef.current;
+    if (!nav) return;
+
+    const onScroll = () => {
+      nav.classList.toggle('nav-scrolled', window.scrollY > 60);
+    };
+
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -83,7 +102,7 @@ function VibeApp() {
   return (
     <div className="app-root">
       {/* ═══════════════════  NAV  ═══════════════════ */}
-      <nav className="nav">
+      <nav className="nav" ref={navRef}>
         <div className="nav-left">
           <div className="nav-logo-icon">◈</div>
           <span className="nav-brand">Vibe Analyzer</span>
@@ -102,10 +121,10 @@ function VibeApp() {
           </div>
 
           <h1 className="hero-headline">
-            Crafting<br />
-            soundtracks<br />
-            through<br />
-            <em className="hero-headline-accent">vibes</em>
+            <span className="hero-line">Crafting</span>
+            <span className="hero-line">soundtracks</span>
+            <span className="hero-line">through</span>
+            <em className="hero-line hero-headline-accent">vibes</em>
           </h1>
 
           <p className="hero-subtitle">
@@ -141,6 +160,12 @@ function VibeApp() {
               )}
             </button>
           </form>
+        </div>
+
+        {/* Scroll indicator */}
+        <div className="hero-scroll-indicator">
+          <div className="hero-scroll-line" />
+          <div className="hero-scroll-arrow" />
         </div>
       </section>
 
@@ -220,7 +245,7 @@ function VibeApp() {
       )}
 
       {/* ═══════════════════  FOOTER  ═══════════════════ */}
-      <footer className="footer">
+      <footer className="footer reveal">
         <div className="footer-inner">
           <div className="footer-brand">
             <div className="footer-logo">
