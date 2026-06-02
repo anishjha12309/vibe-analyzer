@@ -3,6 +3,7 @@ backend/.venv/
 backend/__pycache__/
 backend/*.pyc
 backend/.env
+backend/.cache
 backend/test_spotify.py
 
 # Node / frontend
