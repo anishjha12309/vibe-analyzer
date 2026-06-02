@@ -1,0 +1,15 @@
+# Python / backend
+backend/.venv/
+backend/__pycache__/
+backend/*.pyc
+backend/.env
+backend/test_spotify.py
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+
+# OS
+.DS_Store
+Thumbs.db
