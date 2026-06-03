@@ -51,11 +51,8 @@ export function VibeChart({ sentiment, features }: Props) {
 
   const data = CHART_METRICS.map(m => ({
     name: m.label,
-    'Comment Signal': commentSignals[m.key as keyof typeof commentSignals] ?? 0,
-    'Audio Feature':
-      m.key === 'energy'
-        ? audioSignals.energy
-        : (audioSignals[m.key as keyof typeof audioSignals] ?? 0),
+    'Comment Signal': commentSignals[m.key],
+    'Audio Feature': audioSignals[m.key],
   }));
 
   return (

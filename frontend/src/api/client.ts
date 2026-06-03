@@ -30,12 +30,18 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<FetchResul
   return { data, quotaWarning };
 }
 
+function buildVibeBody(input: string): { youtube_url?: string; video_id?: string } {
+  const trimmed = input.trim();
+  const isUrl = trimmed.includes('youtube.com') || trimmed.includes('youtu.be');
+  return isUrl ? { youtube_url: trimmed } : { video_id: trimmed };
+}
+
 export const api = {
-  matchVibe(body: { youtube_url?: string; video_id?: string }) {
+  matchVibe(input: string) {
     return apiFetch<VibeMatcherResponse>('/api/vibe-matcher', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify(buildVibeBody(input)),
     });
   },
 
@@ -43,7 +49,9 @@ export const api = {
     return apiFetch<Comment[]>(`/api/youtube/comments/${videoId}`);
   },
 
-  getTrackFeatures(trackId: string) {
-    return apiFetch<AudioFeatures>(`/api/spotify/track-features/${trackId}`);
+  getTrackFeatures(trackId: string, vibe: string) {
+    return apiFetch<AudioFeatures>(
+      `/api/spotify/track-features/${trackId}?vibe=${encodeURIComponent(vibe)}`,
+    );
   },
 };

@@ -10,12 +10,13 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import spotipy
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import Response
 from googleapiclient.discovery import build
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator, model_validator
 from pydantic_settings import BaseSettings
+from starlette.middleware.base import BaseHTTPMiddleware
 from spotipy.oauth2 import SpotifyClientCredentials
 
 
@@ -59,6 +60,14 @@ class TTLCache:
         if len(self._store) > self._maxsize:
             self._store.popitem(last=False)
 
+    @property
+    def size(self) -> int:
+        return len(self._store)
+
+    @property
+    def ttl(self) -> int:
+        return self._ttl
+
 
 _cache = TTLCache()
 
@@ -69,50 +78,69 @@ class RollingWindowLimiter:
     def __init__(self) -> None:
         self._windows: dict[str, dict[str, list[float]]] = {}
 
-    def is_allowed(self, ip: str, group: str, max_requests: int, window: int = 60) -> bool:
+    def is_allowed(
+        self, ip: str, group: str, max_requests: int, window: int = 60
+    ) -> tuple[bool, int, int]:
+        """Returns (allowed, remaining, reset_in_seconds)."""
         now = time.monotonic()
         self._windows.setdefault(ip, {}).setdefault(group, [])
-        ts_list = self._windows[ip][group]
-        self._windows[ip][group] = [t for t in ts_list if now - t < window]
-        if len(self._windows[ip][group]) >= max_requests:
-            return False
+        self._windows[ip][group] = [t for t in self._windows[ip][group] if now - t < window]
+        current = self._windows[ip][group]
+        oldest = min(current) if current else now
+        reset_in = max(0, int(window - (now - oldest)))
+        if len(current) >= max_requests:
+            return False, 0, reset_in
         self._windows[ip][group].append(now)
-        return True
+        remaining = max_requests - len(self._windows[ip][group])
+        return True, remaining, reset_in
 
 
 _limiter = RollingWindowLimiter()
 _LIMITS: dict[str, int] = {"vibe_matcher": 5, "youtube": 10, "spotify": 10}
 
 
-def _check_rate(request: Request, group: str) -> None:
+def _check_rate(request: Request, group: str) -> dict[str, str]:
+    """Enforces rate limit; returns RateLimit headers to attach to the response."""
     ip = request.client.host if request.client else "unknown"
-    if not _limiter.is_allowed(ip, group, _LIMITS.get(group, 10)):
+    limit = _LIMITS.get(group, 10)
+    allowed, remaining, reset_in = _limiter.is_allowed(ip, group, limit)
+    rl_headers = {
+        "RateLimit-Limit": str(limit),
+        "RateLimit-Remaining": str(remaining),
+        "RateLimit-Reset": str(reset_in),
+    }
+    if not allowed:
         raise HTTPException(
             status_code=429,
-            detail=f"Rate limit exceeded: max {_LIMITS.get(group)} req/min for {group}. Try again shortly.",
+            detail=f"Rate limit exceeded: max {limit} req/min for {group}. Try again shortly.",
+            headers=rl_headers,
         )
+    return rl_headers
 
 
-# ─── API Client Factories ───────────────────────────────────────────────────────
-
-def _yt():
-    return build("youtube", "v3", developerKey=settings.youtube_api_key)
-
-
-def _sp() -> spotipy.Spotify:
-    return spotipy.Spotify(
-        auth_manager=SpotifyClientCredentials(
-            client_id=settings.spotify_client_id,
-            client_secret=settings.spotify_client_secret,
-        )
-    )
 
 
 # ─── Pydantic Schemas ───────────────────────────────────────────────────────────
 
-class VibeMatcherRequest(BaseModel):
-    youtube_url: str | None = None
-    video_id: str | None = None
+class AudioFeatures(BaseModel):
+    id: str
+    danceability: float
+    energy: float
+    valence: float
+    tempo: float
+    acousticness: float
+    instrumentalness: float
+    speechiness: float
+    loudness: float
+
+
+class VibeProfile(BaseModel):
+    label: str
+
+
+class ResponseMeta(BaseModel):
+    degraded: bool = False
+    warning: str | None = None
 
 
 class SpotifyTrack(BaseModel):
@@ -132,14 +160,15 @@ class VideoMetadata(BaseModel):
     category_id: str
     view_count: int
     like_count: int
-    vibe_profile: dict[str, Any]
+    vibe_profile: VibeProfile
 
 
 class VibeMatcherResponse(BaseModel):
     video: VideoMetadata
     tracks: list[SpotifyTrack]
     vibe_label: str
-    audio_profile: AudioFeatures  # vibe-estimated values (Spotify audio-features deprecated Nov 2024)
+    audio_profile: AudioFeatures  # vibe-estimated (Spotify audio-features deprecated Nov 2024)
+    meta: ResponseMeta = ResponseMeta()
 
 
 class Comment(BaseModel):
@@ -149,16 +178,22 @@ class Comment(BaseModel):
     published_at: str
 
 
-class AudioFeatures(BaseModel):
-    id: str
-    danceability: float
-    energy: float
-    valence: float
-    tempo: float
-    acousticness: float
-    instrumentalness: float
-    speechiness: float
-    loudness: float
+class VibeMatcherRequest(BaseModel):
+    youtube_url: str | None = None
+    video_id: str | None = None
+
+    @field_validator("video_id")
+    @classmethod
+    def validate_video_id(cls, v: str | None) -> str | None:
+        if v is not None and not re.fullmatch(r"[A-Za-z0-9_-]{11}", v.strip()):
+            raise ValueError("video_id must be exactly 11 alphanumeric/dash/underscore characters")
+        return v.strip() if v else v
+
+    @model_validator(mode="after")
+    def require_one_input(self) -> "VibeMatcherRequest":
+        if not self.youtube_url and not self.video_id:
+            raise ValueError("Provide either youtube_url or video_id")
+        return self
 
 
 # ─── Vibe Classification Engine ─────────────────────────────────────────────────
@@ -332,6 +367,27 @@ def _extract_video_id(url: str) -> str:
     raise ValueError(f"Cannot extract a valid video ID from: {url}")
 
 
+def _vary_features(base: dict[str, float], track_id: str) -> dict[str, float]:
+    """Apply deterministic per-track variation to vibe-level baseline estimates.
+
+    Since Spotify deprecated audio-features for new apps (Nov 2024) there are no
+    real per-track values available.  We seed a PRNG from the track_id hash so
+    every track gets a stable, unique fingerprint that still reflects the vibe
+    category (±8 % for 0-1 features, ±12 BPM for tempo, ±2 dB for loudness).
+    """
+    seed = int(hashlib.md5(track_id.encode()).hexdigest()[:8], 16)
+    rng = _random.Random(seed)
+    result: dict[str, float] = {}
+    for key, val in base.items():
+        if key == "tempo":
+            result[key] = round(max(60.0, min(200.0, val + rng.uniform(-12.0, 12.0))), 1)
+        elif key == "loudness":
+            result[key] = round(max(-20.0, min(-1.0, val + rng.uniform(-2.0, 2.0))), 1)
+        else:
+            result[key] = round(max(0.0, min(1.0, val + rng.uniform(-0.08, 0.08))), 2)
+    return result
+
+
 # ─── Mock Fallback Data ─────────────────────────────────────────────────────────
 
 _MOCK_TRACKS: list[dict[str, Any]] = [
@@ -374,6 +430,13 @@ def _ascii_header(value: str) -> str:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    app.state.yt = build("youtube", "v3", developerKey=settings.youtube_api_key)
+    app.state.sp = spotipy.Spotify(
+        auth_manager=SpotifyClientCredentials(
+            client_id=settings.spotify_client_id,
+            client_secret=settings.spotify_client_secret,
+        )
+    )
     yield
 
 
@@ -388,34 +451,83 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Quota-Warning"],
+    expose_headers=[
+        "X-Quota-Warning",
+        "X-Next-Page-Token",
+        "RateLimit-Limit",
+        "RateLimit-Remaining",
+        "RateLimit-Reset",
+        "Cache-Control",
+    ],
 )
+
+
+class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        return response
+
+
+app.add_middleware(_SecurityHeadersMiddleware)
+
+
+def get_yt(request: Request):
+    return request.app.state.yt
+
+
+def get_sp(request: Request) -> spotipy.Spotify:
+    return request.app.state.sp
 
 
 # ─── POST /api/vibe-matcher ─────────────────────────────────────────────────────
 
-@app.post("/api/vibe-matcher", response_model=VibeMatcherResponse)
-async def vibe_matcher(body: VibeMatcherRequest, request: Request):
-    _check_rate(request, "vibe_matcher")
+@app.post(
+    "/api/vibe-matcher",
+    response_model=VibeMatcherResponse,
+    summary="Match a YouTube video to Spotify tracks by vibe",
+    tags=["Vibe"],
+    responses={
+        400: {"description": "Invalid or missing youtube_url / video_id"},
+        404: {"description": "YouTube video not found"},
+        422: {"description": "Validation error (e.g. malformed video_id)"},
+        429: {"description": "Rate limit exceeded"},
+        500: {"description": "Upstream YouTube or Spotify error"},
+    },
+)
+async def vibe_matcher(
+    body: VibeMatcherRequest,
+    request: Request,
+    response: Response,
+    yt=Depends(get_yt),
+    sp: spotipy.Spotify = Depends(get_sp),
+):
+    """Classify the vibe of a YouTube video and return up to 20 matching Spotify tracks.
+    Pass either a full YouTube URL or an 11-character video ID. Results are cached for 5 minutes."""
+    rl_headers = _check_rate(request, "vibe_matcher")
+    for k, v in rl_headers.items():
+        response.headers[k] = v
 
     if body.video_id:
-        video_id = body.video_id.strip()
-    elif body.youtube_url:
+        video_id = body.video_id
+    else:
         try:
-            video_id = _extract_video_id(body.youtube_url)
+            video_id = _extract_video_id(body.youtube_url)  # type: ignore[arg-type]
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
-    else:
-        raise HTTPException(status_code=400, detail="Provide youtube_url or video_id.")
 
     cache_key = f"vibe:{video_id}"
     hit, cached = _cache.get(cache_key)
     if hit:
         return cached
 
+    _mock_est = _VIBE_TARGETS["default"]["est_features"]
+    _mock_audio = AudioFeatures(id="estimated_default", **_mock_est)
+
     # ── Fetch YouTube metadata ──
     try:
-        yt = _yt()
         resp = await asyncio.to_thread(
             lambda: yt.videos().list(part="snippet,statistics", id=video_id).execute()
         )
@@ -434,19 +546,18 @@ async def vibe_matcher(body: VibeMatcherRequest, request: Request):
         raise
     except Exception as e:
         if _is_quota_error(e):
-            result = VibeMatcherResponse(
+            response.headers["X-Quota-Warning"] = "YouTube API quota exceeded - mock data returned."
+            return VibeMatcherResponse(
                 video=VideoMetadata(
-                    video_id=video_id, title="[Mock — Quota Exceeded]",
+                    video_id=video_id, title="Demo Video",
                     description="YouTube quota exhausted; showing demo data.",
                     tags=[], category_id="0", view_count=0, like_count=0,
-                    vibe_profile=_VIBE_TARGETS["default"],
+                    vibe_profile=VibeProfile(label="Balanced"),
                 ),
                 tracks=[SpotifyTrack(**t) for t in _MOCK_TRACKS],
-                vibe_label="Balanced (Mock)",
-            )
-            return JSONResponse(
-                content=result.model_dump(),
-                headers={"X-Quota-Warning": "YouTube API quota exceeded - mock data returned."},
+                vibe_label="Balanced",
+                audio_profile=_mock_audio,
+                meta=ResponseMeta(degraded=True, warning="YouTube API quota exceeded."),
             )
         raise HTTPException(status_code=500, detail=f"YouTube error: {e}")
 
@@ -454,14 +565,11 @@ async def vibe_matcher(body: VibeMatcherRequest, request: Request):
     profile = _VIBE_TARGETS[vibe]
 
     # ── Spotify track search (recommendations API deprecated Nov 2024) ──
-    # Sample 5 artists from the vibe's pool, seeded by video_id for consistency
     _rng = _random.Random(video_id)
-    all_queries = profile["search_queries"]
-    queries = _rng.sample(all_queries, min(5, len(all_queries)))
+    queries = _rng.sample(profile["search_queries"], min(5, len(profile["search_queries"])))
 
     tracks: list[SpotifyTrack] = []
     try:
-        sp = _sp()
         for query in queries:
             if len(tracks) >= 20:
                 break
@@ -507,7 +615,7 @@ async def vibe_matcher(body: VibeMatcherRequest, request: Request):
             video_id=video_id, title=title, description=description,
             tags=tags, category_id=category_id,
             view_count=view_count, like_count=like_count,
-            vibe_profile={k: v for k, v in profile.items() if k not in ("search_queries", "est_features")},
+            vibe_profile=VibeProfile(label=profile["label"]),
         ),
         tracks=tracks,
         vibe_label=profile["label"],
@@ -519,22 +627,42 @@ async def vibe_matcher(body: VibeMatcherRequest, request: Request):
 
 # ─── GET /api/youtube/comments/{video_id} ───────────────────────────────────────
 
-@app.get("/api/youtube/comments/{video_id}", response_model=list[Comment])
-async def get_comments(video_id: str, request: Request):
-    _check_rate(request, "youtube")
+@app.get(
+    "/api/youtube/comments/{video_id}",
+    response_model=list[Comment],
+    summary="Fetch top comments for a YouTube video",
+    tags=["YouTube"],
+    responses={
+        429: {"description": "Rate limit exceeded"},
+        500: {"description": "YouTube API error"},
+    },
+)
+async def get_comments(
+    video_id: str,
+    request: Request,
+    response: Response,
+    yt=Depends(get_yt),
+    limit: int = Query(default=50, ge=1, le=100, description="Number of comments to return (1–100)"),
+):
+    """Returns top-level comments sorted by relevance.
+    If comments are disabled or quota is exceeded the response falls back to sample data
+    and sets X-Quota-Warning. If more comments exist, X-Next-Page-Token is set."""
+    rl_headers = _check_rate(request, "youtube")
+    for k, v in rl_headers.items():
+        response.headers[k] = v
 
-    cache_key = f"comments:{video_id}"
+    cache_key = f"comments:{video_id}:{limit}"
     hit, cached = _cache.get(cache_key)
     if hit:
+        response.headers["Cache-Control"] = f"public, max-age={_cache.ttl}"
         return cached
 
     try:
-        yt = _yt()
         resp = await asyncio.to_thread(
             lambda: yt.commentThreads().list(
                 part="snippet",
                 videoId=video_id,
-                maxResults=50,
+                maxResults=limit,
                 order="relevance",
             ).execute()
         )
@@ -547,61 +675,82 @@ async def get_comments(video_id: str, request: Request):
             )
             for item in resp.get("items", [])
         ]
+        next_page_token = resp.get("nextPageToken")
+        if next_page_token:
+            response.headers["X-Next-Page-Token"] = next_page_token
     except Exception as e:
         if _is_comments_disabled(e):
-            mock = [Comment(**c) for c in _MOCK_COMMENTS]
-            return JSONResponse(
-                content=[c.model_dump() for c in mock],
-                headers={"X-Quota-Warning": _ascii_header("Comments are disabled for this video - showing sample data.")},
+            response.headers["X-Quota-Warning"] = _ascii_header(
+                "Comments are disabled for this video - showing sample data."
             )
+            return [Comment(**c) for c in _MOCK_COMMENTS]
         if _is_quota_error(e):
-            mock = [Comment(**c) for c in _MOCK_COMMENTS]
-            return JSONResponse(
-                content=[c.model_dump() for c in mock],
-                headers={"X-Quota-Warning": _ascii_header("YouTube quota exceeded - showing sample comments.")},
+            response.headers["X-Quota-Warning"] = _ascii_header(
+                "YouTube quota exceeded - showing sample comments."
             )
+            return [Comment(**c) for c in _MOCK_COMMENTS]
         raise HTTPException(status_code=500, detail=str(e))
 
     _cache.set(cache_key, comments)
+    response.headers["Cache-Control"] = f"public, max-age={_cache.ttl}"
     return comments
 
 
 # ─── GET /api/spotify/track-features/{track_id} ─────────────────────────────────
 
-@app.get("/api/spotify/track-features/{track_id}", response_model=AudioFeatures)
-async def get_track_features(track_id: str, request: Request, vibe: str = "default"):
-    """
-    Spotify deprecated audio-features for new apps (Nov 2024).
-    Returns vibe-profile estimated values; pass ?vibe=<key> for accurate estimates.
-    The vibe-matcher endpoint already bundles audio_profile — this endpoint
-    exists as a standalone fallback.
-    """
-    _check_rate(request, "spotify")
+@app.get(
+    "/api/spotify/track-features/{track_id}",
+    response_model=AudioFeatures,
+    summary="Get estimated audio features for a track by vibe",
+    tags=["Spotify"],
+    responses={
+        429: {"description": "Rate limit exceeded"},
+    },
+)
+async def get_track_features(
+    track_id: str,
+    request: Request,
+    response: Response,
+    vibe: str = Query(
+        default="default",
+        description="Vibe key: high_energy | relaxing | happy | melancholic | default",
+    ),
+):
+    """Returns estimated audio features derived from the vibe profile.
+    Spotify deprecated real audio-features for new apps in Nov 2024.
+    The vibe-matcher endpoint already bundles audio_profile — use this
+    endpoint only as a standalone fallback."""
+    rl_headers = _check_rate(request, "spotify")
+    for k, v in rl_headers.items():
+        response.headers[k] = v
 
     cache_key = f"features:{track_id}:{vibe}"
     hit, cached = _cache.get(cache_key)
     if hit:
+        response.headers["Cache-Control"] = f"public, max-age={_cache.ttl}"
         return cached
 
     profile = _VIBE_TARGETS.get(vibe, _VIBE_TARGETS["default"])
-    est = profile["est_features"]
+    varied = _vary_features(profile["est_features"], track_id)
     result = AudioFeatures(
         id=track_id,
-        danceability=est["danceability"],
-        energy=est["energy"],
-        valence=est["valence"],
-        tempo=est["tempo"],
-        acousticness=est["acousticness"],
-        instrumentalness=est["instrumentalness"],
-        speechiness=est["speechiness"],
-        loudness=est["loudness"],
+        danceability=varied["danceability"],
+        energy=varied["energy"],
+        valence=varied["valence"],
+        tempo=varied["tempo"],
+        acousticness=varied["acousticness"],
+        instrumentalness=varied["instrumentalness"],
+        speechiness=varied["speechiness"],
+        loudness=varied["loudness"],
     )
     _cache.set(cache_key, result)
+    response.headers["Cache-Control"] = f"public, max-age={_cache.ttl}"
     return result
 
 
 # ─── GET /health ────────────────────────────────────────────────────────────────
 
-@app.get("/health")
+@app.get("/health", summary="Health check", tags=["System"])
 async def health():
-    return {"status": "ok", "cache_size": len(_cache._store)}
+    """Returns service status and current in-memory cache size."""
+    return {"status": "ok", "cache_size": _cache.size}

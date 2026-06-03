@@ -1,14 +1,11 @@
-import { useEffect, useState } from 'react';
-import { api } from '../api/client';
+import DOMPurify from 'dompurify';
 import type {
-  AnnotatedComment,
   AudioFeatures,
-  SentimentBreakdown,
   SpotifyTrack,
   VideoMetadata,
 } from '../types/api';
-import { analyzeComments } from '../utils/sentiment';
-import { useToast } from '../hooks/useToast';
+import { useCommentAnalysis } from '../hooks/useCommentAnalysis';
+import { useTrackFeatures } from '../hooks/useTrackFeatures';
 import { VibeChart } from './VibeChart';
 
 interface Props {
@@ -17,10 +14,10 @@ interface Props {
   audioProfile: AudioFeatures;
 }
 
-const SENTIMENT_COLOR = {
-  positive: '#22c55e',
-  neutral: '#f59e0b',
-  negative: '#ef4444',
+const SENTIMENT_STYLES = {
+  positive: { color: '#22c55e', background: 'rgba(34,197,94,0.06)',  border: 'rgba(34,197,94,0.15)'  },
+  neutral:  { color: '#f59e0b', background: 'rgba(245,158,11,0.06)', border: 'rgba(245,158,11,0.15)' },
+  negative: { color: '#ef4444', background: 'rgba(239,68,68,0.06)',  border: 'rgba(239,68,68,0.15)'  },
 } as const;
 
 function pct(n: number, total: number) {
@@ -48,31 +45,8 @@ function AudioRow({ label, value, max = 1 }: { label: string; value: number; max
 }
 
 export function Dashboard({ video, track, audioProfile }: Props) {
-  const { addToast } = useToast();
-  const [comments, setComments] = useState<AnnotatedComment[]>([]);
-  const [breakdown, setBreakdown] = useState<SentimentBreakdown | null>(null);
-  const [features] = useState<AudioFeatures>(audioProfile);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setLoading(true);
-    setError(null);
-
-    api.getComments(video.video_id)
-      .then(({ data, quotaWarning }) => {
-        if (quotaWarning) addToast(quotaWarning, 'warning');
-        const { annotated, breakdown: bd } = analyzeComments(data);
-        setComments(annotated);
-        setBreakdown(bd);
-      })
-      .catch(err => {
-        const msg = err instanceof Error ? err.message : 'Failed to load comments';
-        setError(msg);
-        addToast(msg, 'error');
-      })
-      .finally(() => setLoading(false));
-  }, [video.video_id]);
+  const { comments, breakdown, loading, error } = useCommentAnalysis(video.video_id);
+  const features = useTrackFeatures(track.id, audioProfile);
 
   /* ── Loading state ─────────────────────────────────────────── */
   if (loading) {
@@ -134,7 +108,7 @@ export function Dashboard({ video, track, audioProfile }: Props) {
                   className="sentiment-bar-segment"
                   style={{
                     width: `${pct(breakdown[s], breakdown.total)}%`,
-                    background: SENTIMENT_COLOR[s],
+                    background: SENTIMENT_STYLES[s].color,
                   }}
                 />
               ))}
@@ -142,35 +116,17 @@ export function Dashboard({ video, track, audioProfile }: Props) {
 
             {/* Sentiment rows */}
             {(['positive', 'neutral', 'negative'] as const).map(s => {
-              const colorMap = {
-                positive: {
-                  background: 'rgba(34,197,94,0.06)',
-                  border: 'rgba(34,197,94,0.15)',
-                  color: '#22c55e',
-                },
-                neutral: {
-                  background: 'rgba(245,158,11,0.06)',
-                  border: 'rgba(245,158,11,0.15)',
-                  color: '#f59e0b',
-                },
-                negative: {
-                  background: 'rgba(239,68,68,0.06)',
-                  border: 'rgba(239,68,68,0.15)',
-                  color: '#ef4444',
-                },
-              } as const;
-
-              const c = colorMap[s];
+              const styles = SENTIMENT_STYLES[s];
               return (
                 <div
                   key={s}
                   className="sentiment-row"
                   style={{
-                    background: c.background,
-                    borderColor: c.border,
+                    background: styles.background,
+                    borderColor: styles.border,
                   }}
                 >
-                  <span style={{ color: c.color, textTransform: 'capitalize' }}>{s}</span>
+                  <span style={{ color: styles.color, textTransform: 'capitalize' }}>{s}</span>
                   <span style={{ fontWeight: 600 }}>
                     {breakdown[s]} ({pct(breakdown[s], breakdown.total)}%)
                   </span>
@@ -184,20 +140,25 @@ export function Dashboard({ video, track, audioProfile }: Props) {
                 <div
                   key={i}
                   className="comment-card"
-                  style={{ borderLeftColor: SENTIMENT_COLOR[c.sentiment] }}
+                  style={{ borderLeftColor: SENTIMENT_STYLES[c.sentiment].color }}
                 >
                   <div className="comment-header">
                     <span className="comment-author">{c.author}</span>
                     <span
                       className="comment-sentiment"
-                      style={{ color: SENTIMENT_COLOR[c.sentiment] }}
+                      style={{ color: SENTIMENT_STYLES[c.sentiment].color }}
                     >
                       {c.sentiment}
                     </span>
                   </div>
                   <div
                     className="comment-text"
-                    dangerouslySetInnerHTML={{ __html: c.text }}
+                    dangerouslySetInnerHTML={{
+                      __html: DOMPurify.sanitize(c.text, {
+                        ALLOWED_TAGS: ['a', 'b', 'i', 'em', 'strong', 'br'],
+                        ALLOWED_ATTR: ['href', 'target', 'rel'],
+                      }),
+                    }}
                   />
                 </div>
               ))}

@@ -5,30 +5,11 @@ import { useToast } from './hooks/useToast';
 import { ToastProvider } from './hooks/useToast';
 import { TrackList } from './components/TrackList';
 import { Dashboard } from './components/Dashboard';
+import { VibeBadge } from './components/VibeBadge';
 import { useLenis } from './hooks/useLenis';
 import { useScrollReveal } from './hooks/useScrollReveal';
 
 import heroBg from './assets/images/hero_bg.png';
-
-/* ─── Vibe badge colour map ─── */
-const VIBE_BADGE_COLORS: Record<string, string> = {
-  'High Energy': '#f97316',
-  'Chill & Relaxing': '#38bdf8',
-  'Happy & Uplifting': '#facc15',
-  'Melancholic': '#818cf8',
-  'Balanced': '#a3a3a3',
-};
-
-function VibeBadge({ label }: { label: string }) {
-  const base =
-    Object.keys(VIBE_BADGE_COLORS).find((k) => label.startsWith(k)) ?? 'Balanced';
-  const color = VIBE_BADGE_COLORS[base] ?? '#a3a3a3';
-  return (
-    <span className="vibe-badge" style={{ borderColor: `${color}60`, background: `${color}18`, color }}>
-      {label}
-    </span>
-  );
-}
 
 /* ─── Inner app (needs toast context) ─── */
 function VibeApp() {
@@ -75,11 +56,8 @@ function VibeApp() {
     setSelectedTrack(null);
     setShowDashboard(false);
 
-    const isUrl = trimmed.includes('youtube.com') || trimmed.includes('youtu.be');
-    const body = isUrl ? { youtube_url: trimmed } : { video_id: trimmed };
-
     try {
-      const { data, quotaWarning } = await api.matchVibe(body);
+      const { data, quotaWarning } = await api.matchVibe(trimmed);
       if (quotaWarning) addToast(quotaWarning, 'warning');
       setResult(data);
     } catch (err) {

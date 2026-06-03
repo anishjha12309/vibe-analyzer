@@ -54,14 +54,24 @@ export function analyzeComments(comments: Comment[]): {
   };
 }
 
+export interface VibeSignals {
+  happiness: number;
+  tension: number;
+  chill: number;
+  engagement: number;
+  energy: number;
+}
+
 /** Maps comment sentiment into vibe-axis signals scaled 0–100 */
-export function sentimentToVibeSignals(b: SentimentBreakdown) {
+export function sentimentToVibeSignals(b: SentimentBreakdown): VibeSignals {
   const t = b.total || 1;
+  const engagement = Math.round(((b.positive + b.negative) / t) * 100);
   return {
     happiness: Math.round((b.positive / t) * 100),
     tension: Math.round((b.negative / t) * 100),
     chill: Math.round((b.neutral / t) * 100),
-    engagement: Math.round(((b.positive + b.negative) / t) * 100),
+    engagement,
+    energy: engagement,
   };
 }
 
@@ -72,15 +82,12 @@ export function featuresToVibeSignals(f: {
   danceability: number;
   tempo: number;
   acousticness: number;
-}) {
-  const normTempo = Math.min(100, Math.max(0, ((f.tempo - 60) / (200 - 60)) * 100));
+}): VibeSignals {
   return {
     happiness: Math.round(f.valence * 100),
-    tension: Math.round((1 - f.valence) * 50 + (f.energy * 50)),
+    tension: Math.round((1 - f.valence) * 50 + f.energy * 50),
     chill: Math.round(f.acousticness * 100),
     engagement: Math.round((f.danceability * 0.5 + f.energy * 0.5) * 100),
-    tempo: Math.round(normTempo),
-    danceability: Math.round(f.danceability * 100),
     energy: Math.round(f.energy * 100),
   };
 }
