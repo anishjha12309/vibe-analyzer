@@ -9,8 +9,6 @@ import { VibeBadge } from './components/VibeBadge';
 import { useLenis } from './hooks/useLenis';
 import { useScrollReveal } from './hooks/useScrollReveal';
 
-import heroBg from './assets/images/hero_bg.png';
-
 /* ─── Inner app (needs toast context) ─── */
 function VibeApp() {
   useLenis();
@@ -91,8 +89,10 @@ function VibeApp() {
         </div>
       </nav>
 
+      {/* ═══════════════════  MAIN  ═══════════════════ */}
+      <main>
       {/* ═══════════════════  HERO  ═══════════════════ */}
-      <section className="hero" style={{ backgroundImage: `url(${heroBg})` }}>
+      <section className="hero" style={{ backgroundImage: `url(/hero_bg.webp)` }}>
         <div className="hero-content">
           <div className="hero-pill">
             <span className="hero-pill-dot">●</span> AI-POWERED VIBE MATCHING
@@ -221,6 +221,8 @@ function VibeApp() {
           </div>
         </section>
       )}
+
+      </main>
 
       {/* ═══════════════════  FOOTER  ═══════════════════ */}
       <footer className="footer reveal">
