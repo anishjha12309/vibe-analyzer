@@ -51,10 +51,10 @@
 
   /* Typography */
   --font-display:
-    "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, system-ui,
+    "Plus Jakarta Sans Variable", "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, system-ui,
     sans-serif;
   --font-body:
-    "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, system-ui,
+    "Plus Jakarta Sans Variable", "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, system-ui,
     sans-serif;
 
   /* Spacing */
